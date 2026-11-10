@@ -1,0 +1,52 @@
+---
+# OpenShift GitOps Application: Ansible Automation Platform with external DBs.
+#
+# Apply after aap-databases is healthy and unmanaged postgres Secrets exist in
+# namespace aap (see gitops/aap/secrets/examples/). Sync wave 10 runs after
+# aap-databases (wave 0).
+#
+# Out-of-band Secret apply (replace CHANGE_ME; use the aap / ms_awx_readonly passwords):
+#
+#   oc apply -f gitops/aap/secrets/examples/external-postgres-configuration-gateway.yaml
+#   oc apply -f gitops/aap/secrets/examples/external-postgres-configuration-controller.yaml
+#   oc apply -f gitops/aap/secrets/examples/external-postgres-configuration-hub.yaml
+#   oc apply -f gitops/aap/secrets/examples/external-postgres-configuration-eda.yaml
+#   oc apply -f gitops/aap/secrets/examples/automation-platform-metrics-postgres-configuration.yaml
+#   oc apply -f gitops/aap/secrets/examples/metrics-controller-readonly-configuration.yaml
+#
+# Or create one secret with oc, e.g.:
+#
+#   oc -n aap create secret generic external-postgres-configuration-gateway \
+#     --from-literal=host=aap-pg-rw.aap-postgres.svc.cluster.local \
+#     --from-literal=port=5432 \
+#     --from-literal=database=platform_gateway \
+#     --from-literal=username=aap \
+#     --from-literal=password='...' \
+#     --from-literal=sslmode=prefer \
+#     --from-literal=target_session_attrs=read-write \
+#     --from-literal=type=unmanaged \
+#     --dry-run=client -o yaml | oc apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aap-platform
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: aap-gitops-external-database
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jritter/aap-gitops-external-database.git
+    targetRevision: main
+    path: gitops/aap
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aap
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

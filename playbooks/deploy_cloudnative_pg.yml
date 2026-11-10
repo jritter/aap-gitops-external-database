@@ -1,0 +1,145 @@
+---
+# Deploy the CloudNativePG operator on an OpenShift cluster.
+#
+# Installs the certified cloudnative-pg Operator from OperatorHub so you can
+# create postgresql.cnpg.io Cluster (and related) resources for external DBs.
+#
+# Prerequisites:
+#   - kubeconfig for a cluster-admin user (KUBECONFIG or ~/.kube/config)
+#   - Certified Operators catalog available (certified-operators)
+#   - kubernetes.core collection installed:
+#       ansible-galaxy collection install -r collections/requirements.yml -p collections
+#
+# Usage:
+#   ansible-playbook playbooks/deploy_cloudnative_pg.yml
+#
+# Optional overrides:
+#   -e cnpg_channel=candidate
+#   -e cnpg_install_plan_approval=Manual
+
+- name: Deploy CloudNativePG operator
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    cnpg_operator_namespace: cnpg-system
+    cnpg_operator_name: cloudnative-pg
+    cnpg_subscription_name: cloudnative-pg
+    cnpg_channel: stable-v1
+    cnpg_catalog_source: certified-operators
+    cnpg_catalog_source_namespace: openshift-marketplace
+    cnpg_install_plan_approval: Automatic
+    cnpg_enable_cluster_monitoring: true
+    cnpg_wait_retries: 60
+    cnpg_wait_delay: 10
+
+  tasks:
+    - name: Ensure CloudNativePG operator namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ cnpg_operator_namespace }}"
+            labels: "{{ {'openshift.io/cluster-monitoring': 'true'} if cnpg_enable_cluster_monitoring else {} }}"
+
+    - name: Ensure OperatorGroup for CloudNativePG (AllNamespaces)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ cnpg_operator_name }}"
+            namespace: "{{ cnpg_operator_namespace }}"
+          spec:
+            upgradeStrategy: Default
+
+    - name: Ensure Subscription for CloudNativePG operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: "{{ cnpg_subscription_name }}"
+            namespace: "{{ cnpg_operator_namespace }}"
+          spec:
+            channel: "{{ cnpg_channel }}"
+            installPlanApproval: "{{ cnpg_install_plan_approval }}"
+            name: "{{ cnpg_operator_name }}"
+            source: "{{ cnpg_catalog_source }}"
+            sourceNamespace: "{{ cnpg_catalog_source_namespace }}"
+
+    - name: Wait for Subscription to reach AtLatestKnown
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cnpg_subscription_name }}"
+        namespace: "{{ cnpg_operator_namespace }}"
+      register: cnpg_subscription
+      until:
+        - cnpg_subscription.resources | length > 0
+        - cnpg_subscription.resources[0].status.state | default('') == 'AtLatestKnown'
+      retries: "{{ cnpg_wait_retries }}"
+      delay: "{{ cnpg_wait_delay }}"
+
+    - name: Wait for CloudNativePG CSV to succeed
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        namespace: "{{ cnpg_operator_namespace }}"
+        label_selectors:
+          - "operators.coreos.com/{{ cnpg_operator_name }}.{{ cnpg_operator_namespace }}"
+      register: cnpg_csv
+      until:
+        - cnpg_csv.resources | length > 0
+        - cnpg_csv.resources | map(attribute='status.phase') | select('equalto', 'Succeeded') | list | length > 0
+      retries: "{{ cnpg_wait_retries }}"
+      delay: "{{ cnpg_wait_delay }}"
+
+    - name: Wait for CloudNativePG controller deployment to be available
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ cnpg_operator_namespace }}"
+      register: cnpg_deployments
+      until:
+        - cnpg_deployments.resources | length > 0
+        - >-
+          cnpg_deployments.resources
+          | map(attribute='status.availableReplicas')
+          | map('default', 0)
+          | map('int')
+          | select('>=', 1)
+          | list
+          | length > 0
+      retries: "{{ cnpg_wait_retries }}"
+      delay: "{{ cnpg_wait_delay }}"
+
+    - name: Wait for Cluster CRD to be established
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: clusters.postgresql.cnpg.io
+      register: cnpg_cluster_crd
+      until:
+        - cnpg_cluster_crd.resources | length > 0
+        - >-
+          cnpg_cluster_crd.resources[0].status.conditions
+          | selectattr('type', 'equalto', 'Established')
+          | map(attribute='status')
+          | select('equalto', 'True')
+          | list
+          | length > 0
+      retries: "{{ cnpg_wait_retries }}"
+      delay: "{{ cnpg_wait_delay }}"
+
+    - name: Show CloudNativePG operator deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "CloudNativePG operator is installed in {{ cnpg_operator_namespace }}."
+          - "Subscription channel: {{ cnpg_channel }} ({{ cnpg_catalog_source }})."
+          - "CSV: {{ cnpg_csv.resources | map(attribute='metadata.name') | list | join(', ') }}."
+          - "You can now create postgresql.cnpg.io/v1 Cluster resources."

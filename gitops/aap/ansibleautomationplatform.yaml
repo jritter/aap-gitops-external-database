@@ -1,0 +1,44 @@
+---
+# Ansible Automation Platform with external (unmanaged) PostgreSQL for all components.
+#
+# Prerequisites before this CR can become healthy:
+#   1. AAP operator installed (playbooks/deploy_aap_operator.yml)
+#   2. CNPG Cluster + Databases healthy (gitops/databases / app aap-databases)
+#   3. Unmanaged postgres Secrets applied out-of-band in namespace aap
+#      (see secrets/examples/ — not synced by Argo CD)
+#
+# Hub uses gp3-csi (RWO). Prefer a single-replica hub layout; switch to an RWX
+# StorageClass if multi-attach PVC errors appear.
+apiVersion: aap.ansible.com/v1alpha1
+kind: AnsibleAutomationPlatform
+metadata:
+  name: aap
+  namespace: aap
+  labels:
+    app.kubernetes.io/name: aap
+    app.kubernetes.io/part-of: aap-gitops-external-database
+spec:
+  database:
+    database_secret: external-postgres-configuration-gateway
+
+  controller:
+    postgres_configuration_secret: external-postgres-configuration-controller
+
+  hub:
+    postgres_configuration_secret: external-postgres-configuration-hub
+    storage_type: file
+    file_storage_storage_class: gp3-csi
+    file_storage_size: 10Gi
+    replicas: 1
+
+  eda:
+    database:
+      database_secret: external-postgres-configuration-eda
+
+  metrics:
+    database:
+      database_secret: automation-platform-metrics-postgres-configuration
+      externally_managed: true
+      ms_awx_readonly_user_secret: metrics-controller-readonly-configuration
+    ms_awx_readonly_user:
+      externally_managed: true

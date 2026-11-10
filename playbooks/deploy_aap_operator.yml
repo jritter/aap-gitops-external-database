@@ -1,0 +1,164 @@
+---
+# Deploy the Red Hat Ansible Automation Platform operator on an OpenShift cluster.
+#
+# Installs ansible-automation-platform-operator from OperatorHub so you can
+# create aap.ansible.com AnsibleAutomationPlatform (and related) resources.
+#
+# Prerequisites:
+#   - kubeconfig for a cluster-admin user (KUBECONFIG or ~/.kube/config)
+#   - Red Hat Operator catalog available (redhat-operators)
+#   - kubernetes.core collection installed:
+#       ansible-galaxy collection install -r collections/requirements.yml -p collections
+#
+# Usage:
+#   ansible-playbook playbooks/deploy_aap_operator.yml
+#
+# Optional overrides:
+#   -e aap_channel=stable-2.7-cluster-scoped
+#   -e aap_install_plan_approval=Manual
+#   -e aap_operator_namespace=ansible-automation-platform
+
+- name: Deploy Ansible Automation Platform operator
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    aap_operator_namespace: aap
+    aap_operator_name: ansible-automation-platform-operator
+    aap_subscription_name: ansible-automation-platform-operator
+    aap_channel: stable-2.7-cluster-scoped
+    aap_catalog_source: redhat-operators
+    aap_catalog_source_namespace: openshift-marketplace
+    aap_install_plan_approval: Automatic
+    aap_enable_cluster_monitoring: true
+    # Default channel is namespaced; cluster-scoped channels use AllNamespaces.
+    aap_cluster_scoped: "{{ 'cluster-scoped' in (aap_channel | string) }}"
+    aap_wait_retries: 60
+    aap_wait_delay: 10
+
+  tasks:
+    - name: Ensure AAP operator namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ aap_operator_namespace }}"
+            labels: "{{ {'openshift.io/cluster-monitoring': 'true'} if aap_enable_cluster_monitoring else {} }}"
+
+    - name: Ensure OperatorGroup for AAP operator (SingleNamespace)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ aap_operator_name }}"
+            namespace: "{{ aap_operator_namespace }}"
+          spec:
+            targetNamespaces:
+              - "{{ aap_operator_namespace }}"
+            upgradeStrategy: Default
+      when: not aap_cluster_scoped | bool
+
+    - name: Ensure OperatorGroup for AAP operator (AllNamespaces)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ aap_operator_name }}"
+            namespace: "{{ aap_operator_namespace }}"
+          spec:
+            upgradeStrategy: Default
+      when: aap_cluster_scoped | bool
+
+    - name: Ensure Subscription for AAP operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: "{{ aap_subscription_name }}"
+            namespace: "{{ aap_operator_namespace }}"
+          spec:
+            channel: "{{ aap_channel }}"
+            installPlanApproval: "{{ aap_install_plan_approval }}"
+            name: "{{ aap_operator_name }}"
+            source: "{{ aap_catalog_source }}"
+            sourceNamespace: "{{ aap_catalog_source_namespace }}"
+
+    - name: Wait for Subscription to reach AtLatestKnown
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ aap_subscription_name }}"
+        namespace: "{{ aap_operator_namespace }}"
+      register: aap_subscription
+      until:
+        - aap_subscription.resources | length > 0
+        - aap_subscription.resources[0].status.state | default('') == 'AtLatestKnown'
+      retries: "{{ aap_wait_retries }}"
+      delay: "{{ aap_wait_delay }}"
+
+    - name: Wait for AAP operator CSV to succeed
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        namespace: "{{ aap_operator_namespace }}"
+        label_selectors:
+          - "operators.coreos.com/{{ aap_operator_name }}.{{ aap_operator_namespace }}"
+      register: aap_csv
+      until:
+        - aap_csv.resources | length > 0
+        - aap_csv.resources | map(attribute='status.phase') | select('equalto', 'Succeeded') | list | length > 0
+      retries: "{{ aap_wait_retries }}"
+      delay: "{{ aap_wait_delay }}"
+
+    - name: Wait for AAP operator controller deployment to be available
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ aap_operator_namespace }}"
+      register: aap_deployments
+      until:
+        - aap_deployments.resources | length > 0
+        - >-
+          aap_deployments.resources
+          | map(attribute='status.availableReplicas')
+          | map('default', 0)
+          | map('int')
+          | select('>=', 1)
+          | list
+          | length > 0
+      retries: "{{ aap_wait_retries }}"
+      delay: "{{ aap_wait_delay }}"
+
+    - name: Wait for AnsibleAutomationPlatform CRD to be established
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: ansibleautomationplatforms.aap.ansible.com
+      register: aap_platform_crd
+      until:
+        - aap_platform_crd.resources | length > 0
+        - >-
+          aap_platform_crd.resources[0].status.conditions
+          | selectattr('type', 'equalto', 'Established')
+          | map(attribute='status')
+          | select('equalto', 'True')
+          | list
+          | length > 0
+      retries: "{{ aap_wait_retries }}"
+      delay: "{{ aap_wait_delay }}"
+
+    - name: Show AAP operator deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "AAP operator is installed in {{ aap_operator_namespace }}."
+          - "Subscription channel: {{ aap_channel }} ({{ aap_catalog_source }})."
+          - "CSV: {{ aap_csv.resources | map(attribute='metadata.name') | list | join(', ') }}."
+          - "You can now create aap.ansible.com/v1alpha1 AnsibleAutomationPlatform resources."

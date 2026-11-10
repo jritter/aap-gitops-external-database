@@ -1,0 +1,167 @@
+---
+# Deploy Red Hat OpenShift GitOps (Argo CD) on a blank OpenShift cluster.
+#
+# Prerequisites:
+#   - kubeconfig for a cluster-admin user (KUBECONFIG or ~/.kube/config)
+#   - Red Hat Operator catalog available (Marketplace / redhat-operators)
+#   - kubernetes.core collection installed:
+#       ansible-galaxy collection install -r collections/requirements.yml -p collections
+#
+# Usage:
+#   ansible-playbook playbooks/deploy_openshift_gitops.yml
+#
+# Optional overrides:
+#   -e gitops_channel=gitops-1.16
+#   -e gitops_install_plan_approval=Manual
+
+- name: Deploy OpenShift GitOps
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    gitops_operator_namespace: openshift-gitops-operator
+    gitops_instance_namespace: openshift-gitops
+    gitops_operator_name: openshift-gitops-operator
+    gitops_subscription_name: openshift-gitops-operator
+    gitops_channel: latest
+    gitops_catalog_source: redhat-operators
+    gitops_catalog_source_namespace: openshift-marketplace
+    gitops_install_plan_approval: Automatic
+    gitops_enable_cluster_monitoring: true
+    gitops_argocd_name: openshift-gitops
+    gitops_wait_retries: 60
+    gitops_wait_delay: 10
+
+  tasks:
+    - name: Ensure OpenShift GitOps Operator namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ gitops_operator_namespace }}"
+            labels: "{{ {'openshift.io/cluster-monitoring': 'true'} if gitops_enable_cluster_monitoring else {} }}"
+
+    - name: Ensure OperatorGroup for OpenShift GitOps Operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ gitops_operator_name }}"
+            namespace: "{{ gitops_operator_namespace }}"
+          spec:
+            upgradeStrategy: Default
+
+    - name: Ensure Subscription for OpenShift GitOps Operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: "{{ gitops_subscription_name }}"
+            namespace: "{{ gitops_operator_namespace }}"
+          spec:
+            channel: "{{ gitops_channel }}"
+            installPlanApproval: "{{ gitops_install_plan_approval }}"
+            name: "{{ gitops_operator_name }}"
+            source: "{{ gitops_catalog_source }}"
+            sourceNamespace: "{{ gitops_catalog_source_namespace }}"
+
+    - name: Wait for Subscription to reach AtLatestKnown
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ gitops_subscription_name }}"
+        namespace: "{{ gitops_operator_namespace }}"
+      register: gitops_subscription
+      until:
+        - gitops_subscription.resources | length > 0
+        - gitops_subscription.resources[0].status.state | default('') == 'AtLatestKnown'
+      retries: "{{ gitops_wait_retries }}"
+      delay: "{{ gitops_wait_delay }}"
+
+    - name: Wait for OpenShift GitOps Operator CSV to succeed
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        namespace: "{{ gitops_operator_namespace }}"
+        label_selectors:
+          - "operators.coreos.com/{{ gitops_operator_name }}.{{ gitops_operator_namespace }}"
+      register: gitops_csv
+      until:
+        - gitops_csv.resources | length > 0
+        - gitops_csv.resources | map(attribute='status.phase') | select('equalto', 'Succeeded') | list | length > 0
+      retries: "{{ gitops_wait_retries }}"
+      delay: "{{ gitops_wait_delay }}"
+
+    - name: Wait for default Argo CD instance namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ gitops_instance_namespace }}"
+      register: gitops_ns
+      until: gitops_ns.resources | length > 0
+      retries: "{{ gitops_wait_retries }}"
+      delay: "{{ gitops_wait_delay }}"
+
+    - name: Wait for default Argo CD custom resource
+      kubernetes.core.k8s_info:
+        api_version: argoproj.io/v1beta1
+        kind: ArgoCD
+        name: "{{ gitops_argocd_name }}"
+        namespace: "{{ gitops_instance_namespace }}"
+      register: gitops_argocd
+      until: gitops_argocd.resources | length > 0
+      retries: "{{ gitops_wait_retries }}"
+      delay: "{{ gitops_wait_delay }}"
+
+    - name: Wait for Argo CD server deployment to be available
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ gitops_argocd_name }}-server"
+        namespace: "{{ gitops_instance_namespace }}"
+      register: gitops_server
+      until:
+        - gitops_server.resources | length > 0
+        - gitops_server.resources[0].status.availableReplicas | default(0) | int >= 1
+      retries: "{{ gitops_wait_retries }}"
+      delay: "{{ gitops_wait_delay }}"
+
+    - name: Wait for Argo CD application controller stateful set to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: StatefulSet
+        name: "{{ gitops_argocd_name }}-application-controller"
+        namespace: "{{ gitops_instance_namespace }}"
+      register: gitops_controller
+      until:
+        - gitops_controller.resources | length > 0
+        - gitops_controller.resources[0].status.readyReplicas | default(0) | int >= 1
+      retries: "{{ gitops_wait_retries }}"
+      delay: "{{ gitops_wait_delay }}"
+
+    - name: Get Argo CD server route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: "{{ gitops_argocd_name }}-server"
+        namespace: "{{ gitops_instance_namespace }}"
+      register: gitops_route
+
+    - name: Show OpenShift GitOps deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "OpenShift GitOps Operator is installed in {{ gitops_operator_namespace }}."
+          - "Default Argo CD instance is ready in {{ gitops_instance_namespace }}."
+          - >-
+            Argo CD URL:
+            https://{{ gitops_route.resources[0].spec.host | default('route-not-found') }}
+          - >-
+            Admin password secret:
+            oc -n {{ gitops_instance_namespace }} extract secret/{{ gitops_argocd_name }}-cluster
+            --keys=admin.password --to=-

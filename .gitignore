@@ -1,0 +1,50 @@
+# Local secrets and env
+.env
+# Ansible
+host_vars/
+playbooks/host_vars/
+inventory/lab.generated.yml
+ansible_leapp_*_logs_*/
+*.retry
+.ansible/
+ansible-navigator.log
+*artifact*.json
+
+vars/my_azure.yml
+
+# Local tooling venv (ansible-navigator / ansible-builder)
+venv_ansible/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
+.vscode
+
+# Ansible builder context
+context/
+
+# Demo recordings
+recordings/
+
+# Scratch
+scratch/
+
+# other artefacts
+*.tar.gz
+*.zip
+*.bz2
+*.gz
+*.xz
+*.tar
+*.tar.bz2
+*.tar.gz
+*.tar.xz
+*.tar.zst
+*.tar.lzma
+*.tar.lz4
+inventory/hosts

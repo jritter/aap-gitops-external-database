@@ -1,0 +1,38 @@
+---
+# OpenShift GitOps Application: CloudNativePG databases for AAP.
+#
+# Bootstrap order:
+#   1. ansible-playbook playbooks/deploy_openshift_gitops.yml
+#   2. ansible-playbook playbooks/deploy_cloudnative_pg.yml
+#   3. ansible-playbook playbooks/deploy_aap_operator.yml
+#   4. Pre-create CNPG role password Secrets:
+#        oc apply -f gitops/databases/secrets/examples/
+#      (replace CHANGE_ME first)
+#   5. oc apply -f gitops/argocd/application-aap-databases.yaml
+#   6. Wait until Cluster aap-pg and Database CRs are ready
+#   7. Apply AAP unmanaged Secrets (gitops/aap/secrets/examples/) into namespace aap
+#   8. oc apply -f gitops/argocd/application-aap-platform.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aap-databases
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: aap-gitops-external-database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jritter/aap-gitops-external-database.git
+    targetRevision: main
+    path: gitops/databases
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aap-postgres
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

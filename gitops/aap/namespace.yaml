@@ -1,0 +1,8 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aap
+  labels:
+    app.kubernetes.io/name: aap
+    app.kubernetes.io/part-of: aap-gitops-external-database

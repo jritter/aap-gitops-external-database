@@ -1,0 +1,19 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: automation-hub
+  namespace: aap-postgres
+  labels:
+    app.kubernetes.io/name: automation-hub
+    app.kubernetes.io/part-of: aap-gitops-external-database
+    aap.ansible.com/component: hub
+spec:
+  name: automation_hub
+  owner: aap
+  cluster:
+    name: aap-pg
+  ensure: present
+  extensions:
+    - name: hstore
+      ensure: present

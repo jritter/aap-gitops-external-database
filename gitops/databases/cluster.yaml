@@ -1,0 +1,40 @@
+---
+# Single CloudNativePG Cluster hosting all AAP component databases.
+#
+# Bootstrap order:
+#   1. Operator playbooks (GitOps, CNPG, AAP)
+#   2. Pre-create role password Secrets (see secrets/examples/)
+#   3. Sync this app (aap-databases)
+#   4. Apply AAP unmanaged DB Secrets out-of-band (see ../aap/secrets/examples/)
+#   5. Sync aap-platform
+#
+# Read/write Service DNS for AAP Secrets:
+#   aap-pg-rw.aap-postgres.svc.cluster.local:5432
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: aap-pg
+  namespace: aap-postgres
+  labels:
+    app.kubernetes.io/name: aap-pg
+    app.kubernetes.io/part-of: aap-gitops-external-database
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:15
+  storage:
+    size: 50Gi
+    storageClass: gp3-csi
+  enableSuperuserAccess: false
+  managed:
+    roles:
+      - name: aap
+        ensure: present
+        login: true
+        createdb: true
+        passwordSecret:
+          name: aap-pg-aap-password
+      - name: ms_awx_readonly
+        ensure: present
+        login: true
+        passwordSecret:
+          name: aap-pg-ms-awx-readonly-password
