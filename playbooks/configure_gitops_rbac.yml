@@ -43,6 +43,12 @@
               app.kubernetes.io/part-of: aap-gitops-external-database
           rules:
             - apiGroups:
+                - ""
+              resources:
+                - secrets
+              verbs:
+                - "*"
+            - apiGroups:
                 - postgresql.cnpg.io
               resources:
                 - "*"
@@ -140,7 +146,7 @@
     - name: Show GitOps RBAC summary
       ansible.builtin.debug:
         msg:
-          - "ClusterRole {{ gitops_rbac_name }} grants postgresql.cnpg.io, AAP API groups, and projects."
+          - "ClusterRole {{ gitops_rbac_name }} grants secrets, postgresql.cnpg.io, AAP API groups, and projects."
           - "Bound to {{ gitops_application_controller_sa }} and {{ gitops_server_sa }} in {{ gitops_instance_namespace }}."
           - "Argo CD excludes project.openshift.io/Project from tracking."
           - "Re-sync the aap-databases / aap-platform Applications if they previously failed."

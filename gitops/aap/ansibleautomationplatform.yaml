@@ -27,7 +27,7 @@ spec:
   hub:
     postgres_configuration_secret: external-postgres-configuration-hub
     storage_type: file
-    file_storage_storage_class: gp3-csi
+    file_storage_storage_class: ocs-external-storagecluster-cephfs
     file_storage_size: 10Gi
     replicas: 1
 
