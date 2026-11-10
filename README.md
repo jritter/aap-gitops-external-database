@@ -71,11 +71,13 @@ ansible-galaxy collection install -r collections/requirements.yml -p collections
    ansible-playbook playbooks/configure_gitops_rbac.yml
    ```
 
-2. **Set real passwords** in the Secret manifests under:
+2. **Set real passwords and static encryption keys** in the Secret manifests under:
    - `gitops/databases/secrets/examples/` (`aap-pg-aap-password`, `aap-pg-ms-awx-readonly-password`)
-   - `gitops/aap/secrets/examples/` (six unmanaged AAP DB Secrets)
+   - `gitops/aap/secrets/examples/` (unmanaged AAP DB Secrets **and** encryption key Secrets)
 
    Use the **same** password for the `aap` role Secret and the AAP component Secrets that use username `aap`. Do not use `'`, `"`, or `\` in passwords.
+
+   Replace `CHANGE_ME_*` encryption key placeholders with stable generated values (see Secrets below). Keep them unchanged across redeploys if encrypted DB content must remain readable.
 
 3. **Commit / push** (Applications track `main` on this repo).
 
@@ -100,8 +102,29 @@ Example Secrets are synced by Kustomize/Argo (listed in each app’s `kustomizat
 | `external-postgres-configuration-*` | `aap` | AAP unmanaged DB connection (`type: unmanaged`) |
 | `automation-platform-metrics-postgres-configuration` | `aap` | Metrics R/W DB |
 | `metrics-controller-readonly-configuration` | `aap` | Metrics RO access to controller DB |
+| `aap-controller-secret-key` | `aap` | Controller `SECRET_KEY` (`stringData.secret_key`) |
+| `aap-hub-secret-key` | `aap` | Hub Django `SECRET_KEY` (`stringData.secret_key`) |
+| `aap-hub-db-fields-encryption` | `aap` | Hub Fernet DB fields key (`database_fields.symmetric.key`) |
+| `aap-eda-db-fields-encryption` | `aap` | EDA DB fields key (`stringData.secret_key`) |
+| `aap-gateway-db-fields-encryption` | `aap` | Gateway DB fields key (`stringData.secret_key`) |
 
 Host used by AAP: `aap-pg-rw.aap-postgres.svc.cluster.local:5432`.
+
+### Static encryption keys
+
+Per Red Hat [Creating a secret key secret](https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.4/html/deploying_the_red_hat_ansible_automation_platform_operator_on_openshift_container_platform/aap-migration#create-secret-key-secret_aap-migration), provide fixed keys so the operator does not generate new ones each install. Wired in `ansibleautomationplatform.yaml` as:
+
+- `spec.db_fields_encryption_secret` → gateway
+- `spec.controller.secret_key_secret` → controller
+- `spec.hub.secret_key_secret` / `spec.hub.db_fields_encryption_secret` → hub
+- `spec.eda.db_fields_encryption_secret` → EDA
+
+Generate examples:
+
+```bash
+python3 -c 'import secrets; print(secrets.token_urlsafe(50))'   # controller / hub Django / eda / gateway
+python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'  # hub DB fields
+```
 
 ## PostDelete database cleanup (reuse Postgres across AAP deploys)
 

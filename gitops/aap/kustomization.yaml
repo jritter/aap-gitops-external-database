@@ -12,4 +12,10 @@ resources:
   - secrets/examples/external-postgres-configuration-eda.yaml
   - secrets/examples/automation-platform-metrics-postgres-configuration.yaml
   - secrets/examples/metrics-controller-readonly-configuration.yaml
+  # Static encryption keys (controller / hub / eda / gateway)
+  - secrets/examples/aap-controller-secret-key.yaml
+  - secrets/examples/aap-hub-secret-key.yaml
+  - secrets/examples/aap-hub-db-fields-encryption.yaml
+  - secrets/examples/aap-eda-db-fields-encryption.yaml
+  - secrets/examples/aap-gateway-db-fields-encryption.yaml
   - hooks/postdelete-truncate-databases.yaml

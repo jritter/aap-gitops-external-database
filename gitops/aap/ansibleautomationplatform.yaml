@@ -4,11 +4,14 @@
 # Prerequisites before this CR can become healthy:
 #   1. AAP operator installed (playbooks/deploy_aap_operator.yml)
 #   2. CNPG Cluster + Databases healthy (gitops/databases / app aap-databases)
-#   3. Unmanaged postgres Secrets applied out-of-band in namespace aap
-#      (see secrets/examples/ — not synced by Argo CD)
+#   3. Unmanaged postgres Secrets + static encryption key Secrets
+#      (gitops/aap/secrets/examples/)
 #
-# Hub uses gp3-csi (RWO). Prefer a single-replica hub layout; switch to an RWX
-# StorageClass if multi-attach PVC errors appear.
+# Static encryption keys (secret_key / db_fields_encryption) keep encrypted DB
+# fields decryptable across Application delete/redeploy cycles when data is kept.
+# With PostDelete schema wipe they still prevent the operator from generating a
+# new key on every install. See Red Hat "Creating a secret key secret":
+# https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.4/html/deploying_the_red_hat_ansible_automation_platform_operator_on_openshift_container_platform/aap-migration#create-secret-key-secret_aap-migration
 apiVersion: aap.ansible.com/v1alpha1
 kind: AnsibleAutomationPlatform
 metadata:
@@ -17,14 +20,20 @@ metadata:
     app.kubernetes.io/name: aap
     app.kubernetes.io/part-of: aap-gitops-external-database
 spec:
+  # Platform gateway DB field encryption key
+  db_fields_encryption_secret: aap-gateway-db-fields-encryption
+
   database:
     database_secret: external-postgres-configuration-gateway
 
   controller:
     postgres_configuration_secret: external-postgres-configuration-controller
+    secret_key_secret: aap-controller-secret-key
 
   hub:
     postgres_configuration_secret: external-postgres-configuration-hub
+    secret_key_secret: aap-hub-secret-key
+    db_fields_encryption_secret: aap-hub-db-fields-encryption
     storage_type: file
     file_storage_storage_class: ocs-external-storagecluster-cephfs
     file_storage_size: 10Gi
@@ -33,6 +42,7 @@ spec:
   eda:
     database:
       database_secret: external-postgres-configuration-eda
+    db_fields_encryption_secret: aap-eda-db-fields-encryption
 
   metrics:
     database:
