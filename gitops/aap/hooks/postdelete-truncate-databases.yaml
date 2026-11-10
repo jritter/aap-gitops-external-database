@@ -1,9 +1,14 @@
 ---
-# PostDelete hook: after aap-platform resources are removed, drop all tables in
-# every AAP external database. Runs in aap-postgres so it can use the CNPG role
-# Secret from aap-databases (AAP Secrets are already gone by then).
+# PostDelete hook: after aap-platform resources are removed, wipe AAP-owned
+# objects in every external database so redeploy can re-initialize schema.
 #
-# Requires: aap-databases Application still present (Cluster + aap-pg-aap-password).
+# DROP TABLE alone is not enough (e.g. Hub/Pulp leaves collation
+# pulp_ansible_semver). Resetting public schema clears tables, collations,
+# types, functions, sequences, etc. hstore is recreated for Hub; CNPG also
+# reconciles it via the Database CR.
+#
+# Runs in aap-postgres so it can use aap-pg-aap-password from aap-databases.
+# Requires: aap-databases Application still present.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -51,29 +56,23 @@ spec:
             - /bin/bash
             - -ec
             - |
-              # Avoid PL/pgSQL $$ quoting: Kubernetes command expansion turns $$ into $.
+              # Avoid PL/pgSQL dollar-quoting: Kubernetes turns $$ into $.
               cleanup_db() {
                 local db="$1"
-                local tables
-                echo "=== Dropping all tables in database: ${db} ==="
-                tables="$(psql -d "${db}" -v ON_ERROR_STOP=1 -Atc \
-                  "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")"
-                if [[ -z "${tables}" ]]; then
-                  echo "No tables in ${db}"
-                  return 0
-                fi
-                while IFS= read -r table; do
-                  [[ -z "${table}" ]] && continue
-                  echo "Dropping ${db}.${table}"
-                  psql -d "${db}" -v ON_ERROR_STOP=1 -c \
-                    "DROP TABLE IF EXISTS \"${table}\" CASCADE"
-                done <<< "${tables}"
+                echo "=== Resetting public schema in database: ${db} ==="
+                # Recreate as the aap role so it owns public (no GRANT needed).
+                psql -d "${db}" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE"
+                psql -d "${db}" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA public"
+                # Hub requires hstore; safe no-op on other databases.
+                psql -d "${db}" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS hstore"
+
+                echo "=== Cleaned database: ${db} ==="
               }
 
               for db in ${AAP_DATABASES}; do
                 cleanup_db "${db}"
               done
-              echo "=== All database tables dropped ==="
+              echo "=== All databases cleaned for schema re-initialization ==="
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
