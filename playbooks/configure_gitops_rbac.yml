@@ -1,0 +1,146 @@
+---
+# Grant OpenShift GitOps permission to manage CNPG, AAP, and OpenShift Project resources.
+#
+# The default openshift-gitops application-controller ServiceAccount cannot manage
+# postgresql.cnpg.io, aap.ansible.com, or project.openshift.io until this is applied.
+# Also appends OpenShift Project to Argo CD resourceExclusions (keeps operator defaults).
+#
+# Prerequisites:
+#   - OpenShift GitOps installed (playbooks/deploy_openshift_gitops.yml)
+#   - kubeconfig for a cluster-admin user
+#
+# Usage:
+#   ansible-playbook playbooks/configure_gitops_rbac.yml
+
+- name: Configure OpenShift GitOps RBAC for AAP and CloudNativePG
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    gitops_instance_namespace: openshift-gitops
+    gitops_argocd_name: openshift-gitops
+    gitops_application_controller_sa: openshift-gitops-argocd-application-controller
+    gitops_server_sa: openshift-gitops-argocd-server
+    gitops_rbac_name: openshift-gitops-aap-cnpg
+    gitops_project_exclusion:
+      apiGroups:
+        - project.openshift.io
+      kinds:
+        - Project
+      clusters:
+        - "*"
+
+  tasks:
+    - name: Ensure ClusterRole for GitOps to manage AAP, CNPG, and Project resources
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: "{{ gitops_rbac_name }}"
+            labels:
+              app.kubernetes.io/part-of: aap-gitops-external-database
+          rules:
+            - apiGroups:
+                - postgresql.cnpg.io
+              resources:
+                - "*"
+              verbs:
+                - "*"
+            - apiGroups:
+                - aap.ansible.com
+                - automationcontroller.ansible.com
+                - automationhub.ansible.com
+                - eda.ansible.com
+                - lightspeed.ansible.com
+                - mcpserver.ansible.com
+              resources:
+                - "*"
+              verbs:
+                - "*"
+            - apiGroups:
+                - project.openshift.io
+              resources:
+                - projects
+              verbs:
+                - "*"
+
+    - name: Bind ClusterRole to GitOps application-controller
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "{{ gitops_rbac_name }}-application-controller"
+            labels:
+              app.kubernetes.io/part-of: aap-gitops-external-database
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: "{{ gitops_rbac_name }}"
+          subjects:
+            - kind: ServiceAccount
+              name: "{{ gitops_application_controller_sa }}"
+              namespace: "{{ gitops_instance_namespace }}"
+
+    - name: Bind ClusterRole to GitOps server
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "{{ gitops_rbac_name }}-server"
+            labels:
+              app.kubernetes.io/part-of: aap-gitops-external-database
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: "{{ gitops_rbac_name }}"
+          subjects:
+            - kind: ServiceAccount
+              name: "{{ gitops_server_sa }}"
+              namespace: "{{ gitops_instance_namespace }}"
+
+    - name: Read current Argo CD resourceExclusions
+      kubernetes.core.k8s_info:
+        api_version: argoproj.io/v1beta1
+        kind: ArgoCD
+        name: "{{ gitops_argocd_name }}"
+        namespace: "{{ gitops_instance_namespace }}"
+      register: gitops_argocd
+
+    - name: Build resourceExclusions including OpenShift Project
+      ansible.builtin.set_fact:
+        gitops_resource_exclusions: >-
+          {{
+            (
+              (gitops_argocd.resources[0].spec.resourceExclusions | default('[]') | from_yaml)
+              | rejectattr('apiGroups', 'contains', 'project.openshift.io')
+              | list
+            )
+            + [gitops_project_exclusion]
+          }}
+
+    - name: Ensure OpenShift Project is excluded from Argo CD tracking
+      kubernetes.core.k8s:
+        state: present
+        merge_type: merge
+        definition:
+          apiVersion: argoproj.io/v1beta1
+          kind: ArgoCD
+          metadata:
+            name: "{{ gitops_argocd_name }}"
+            namespace: "{{ gitops_instance_namespace }}"
+          spec:
+            resourceExclusions: "{{ gitops_resource_exclusions | to_nice_yaml }}"
+
+    - name: Show GitOps RBAC summary
+      ansible.builtin.debug:
+        msg:
+          - "ClusterRole {{ gitops_rbac_name }} grants postgresql.cnpg.io, AAP API groups, and projects."
+          - "Bound to {{ gitops_application_controller_sa }} and {{ gitops_server_sa }} in {{ gitops_instance_namespace }}."
+          - "Argo CD excludes project.openshift.io/Project from tracking."
+          - "Re-sync the aap-databases / aap-platform Applications if they previously failed."
