@@ -46,6 +46,15 @@
                 - ""
               resources:
                 - secrets
+                - pods
+                - pods/log
+                - serviceaccounts
+              verbs:
+                - "*"
+            - apiGroups:
+                - batch
+              resources:
+                - jobs
               verbs:
                 - "*"
             - apiGroups:

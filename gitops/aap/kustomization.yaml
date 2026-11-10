@@ -12,3 +12,4 @@ resources:
   - secrets/examples/external-postgres-configuration-eda.yaml
   - secrets/examples/automation-platform-metrics-postgres-configuration.yaml
   - secrets/examples/metrics-controller-readonly-configuration.yaml
+  - hooks/postdelete-truncate-databases.yaml

@@ -1,0 +1,90 @@
+---
+# PostDelete hook: after aap-platform resources are removed, drop all tables in
+# every AAP external database. Runs in aap-postgres so it can use the CNPG role
+# Secret from aap-databases (AAP Secrets are already gone by then).
+#
+# Requires: aap-databases Application still present (Cluster + aap-pg-aap-password).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aap-postdelete-truncate-dbs
+  namespace: aap-postgres
+  labels:
+    app.kubernetes.io/name: aap-postdelete-truncate-dbs
+    app.kubernetes.io/part-of: aap-gitops-external-database
+  annotations:
+    argocd.argoproj.io/hook: PostDelete
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aap-postdelete-truncate-dbs
+        app.kubernetes.io/part-of: aap-gitops-external-database
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: cleanup
+          image: ghcr.io/cloudnative-pg/postgresql:15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGHOST
+              value: aap-pg-rw.aap-postgres.svc.cluster.local
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: aap-pg-aap-password
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aap-pg-aap-password
+                  key: password
+            - name: AAP_DATABASES
+              value: platform_gateway automation_controller automation_hub automation_eda metrics_service
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              cleanup_db() {
+                local db="$1"
+                echo "=== Dropping all tables in database: ${db} ==="
+                psql -d "${db}" -v ON_ERROR_STOP=1 <<'SQL'
+              DO $$
+              DECLARE
+                r RECORD;
+              BEGIN
+                FOR r IN
+                  SELECT tablename
+                  FROM pg_tables
+                  WHERE schemaname = 'public'
+                  ORDER BY tablename
+                LOOP
+                  EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', r.tablename);
+                  RAISE NOTICE 'dropped %', r.tablename;
+                END LOOP;
+              END $$;
+              SQL
+              }
+
+              for db in ${AAP_DATABASES}; do
+                cleanup_db "${db}"
+              done
+              echo "=== All database tables dropped ==="
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
