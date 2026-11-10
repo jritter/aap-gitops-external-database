@@ -23,7 +23,7 @@ spec:
   imageName: ghcr.io/cloudnative-pg/postgresql:15
   storage:
     size: 50Gi
-    storageClass: gp3-csi
+    storageClass: ocs-external-storagecluster-ceph-rbd
   enableSuperuserAccess: false
   managed:
     roles:
