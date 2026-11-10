@@ -51,25 +51,23 @@ spec:
             - /bin/bash
             - -ec
             - |
+              # Avoid PL/pgSQL $$ quoting: Kubernetes command expansion turns $$ into $.
               cleanup_db() {
                 local db="$1"
+                local tables
                 echo "=== Dropping all tables in database: ${db} ==="
-                psql -d "${db}" -v ON_ERROR_STOP=1 <<'SQL'
-              DO $$
-              DECLARE
-                r RECORD;
-              BEGIN
-                FOR r IN
-                  SELECT tablename
-                  FROM pg_tables
-                  WHERE schemaname = 'public'
-                  ORDER BY tablename
-                LOOP
-                  EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', r.tablename);
-                  RAISE NOTICE 'dropped %', r.tablename;
-                END LOOP;
-              END $$;
-              SQL
+                tables="$(psql -d "${db}" -v ON_ERROR_STOP=1 -Atc \
+                  "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")"
+                if [[ -z "${tables}" ]]; then
+                  echo "No tables in ${db}"
+                  return 0
+                fi
+                while IFS= read -r table; do
+                  [[ -z "${table}" ]] && continue
+                  echo "Dropping ${db}.${table}"
+                  psql -d "${db}" -v ON_ERROR_STOP=1 -c \
+                    "DROP TABLE IF EXISTS \"${table}\" CASCADE"
+                done <<< "${tables}"
               }
 
               for db in ${AAP_DATABASES}; do
