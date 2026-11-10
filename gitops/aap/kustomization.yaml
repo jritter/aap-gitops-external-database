@@ -5,5 +5,10 @@ resources:
   # Namespace is created by the Application (CreateNamespace=true). Keeping a
   # Namespace manifest on OpenShift causes Argo CD to fight project.openshift.io/Project.
   - ansibleautomationplatform.yaml
-# Password-bearing Secrets live under secrets/examples/ and are applied out-of-band
-# so Argo CD does not overwrite real credentials.
+  # Example unmanaged postgres Secrets (replace CHANGE_ME before/after first sync).
+  - secrets/examples/external-postgres-configuration-gateway.yaml
+  - secrets/examples/external-postgres-configuration-controller.yaml
+  - secrets/examples/external-postgres-configuration-hub.yaml
+  - secrets/examples/external-postgres-configuration-eda.yaml
+  - secrets/examples/automation-platform-metrics-postgres-configuration.yaml
+  - secrets/examples/metrics-controller-readonly-configuration.yaml

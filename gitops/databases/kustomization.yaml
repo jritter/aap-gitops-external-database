@@ -10,3 +10,6 @@ resources:
   - database-hub.yaml
   - database-eda.yaml
   - database-metrics.yaml
+  # CNPG role password Secrets (replace CHANGE_ME before/after first sync).
+  - secrets/examples/aap-pg-aap-password.yaml
+  - secrets/examples/aap-pg-ms-awx-readonly-password.yaml
