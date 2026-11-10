@@ -3,7 +3,6 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: automation-eda
-  namespace: aap-postgres
   labels:
     app.kubernetes.io/name: automation-eda
     app.kubernetes.io/part-of: aap-gitops-external-database

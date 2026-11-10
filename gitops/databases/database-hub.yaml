@@ -3,7 +3,6 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: automation-hub
-  namespace: aap-postgres
   labels:
     app.kubernetes.io/name: automation-hub
     app.kubernetes.io/part-of: aap-gitops-external-database

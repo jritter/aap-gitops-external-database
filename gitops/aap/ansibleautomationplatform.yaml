@@ -13,7 +13,6 @@ apiVersion: aap.ansible.com/v1alpha1
 kind: AnsibleAutomationPlatform
 metadata:
   name: aap
-  namespace: aap
   labels:
     app.kubernetes.io/name: aap
     app.kubernetes.io/part-of: aap-gitops-external-database

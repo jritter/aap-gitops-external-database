@@ -3,7 +3,6 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: platform-gateway
-  namespace: aap-postgres
   labels:
     app.kubernetes.io/name: platform-gateway
     app.kubernetes.io/part-of: aap-gitops-external-database
