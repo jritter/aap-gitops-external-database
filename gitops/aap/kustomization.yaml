@@ -18,4 +18,4 @@ resources:
   - secrets/examples/aap-hub-db-fields-encryption.yaml
   - secrets/examples/aap-eda-db-fields-encryption.yaml
   - secrets/examples/aap-gateway-db-fields-encryption.yaml
-#  - hooks/postdelete-truncate-databases.yaml
+  - hooks/postdelete-truncate-databases.yaml
